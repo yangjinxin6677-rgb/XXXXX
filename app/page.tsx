@@ -5,18 +5,18 @@ import {
   Sparkles, Copy, RefreshCw, AlertCircle, Check, CalendarDays, 
   ClipboardList, ImagePlus, Loader2, PenLine, Mic, FileAudio, 
   QrCode, X, Smartphone, Briefcase, CheckCircle2, Circle, Clock,
-  Building2, Square, Volume2, ChevronDown, ChevronUp
+  Building2, Square, Volume2, ChevronDown, ChevronUp, ShieldCheck, ShieldAlert
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 
-// ------------------------------------------------------------------
-// 1. TYPES
-// ------------------------------------------------------------------
+// ==============================================================================
+// 1. TYPES & INTERFACES (类型定义)
+// ==============================================================================
 
 enum TaskStatus {
-  PENDING = 'PENDING', // Not selected
-  DOING = 'DOING',     // In Progress
-  DONE = 'DONE'        // Completed
+  PENDING = 'PENDING', // 未选择
+  DOING = 'DOING',     // 进行中
+  DONE = 'DONE'        // 已完成
 }
 
 type ReportMode = 'DAILY' | 'WEEKLY' | 'MEETING';
@@ -46,9 +46,9 @@ interface ReportGenerationParams {
   meetingContext?: string;
 }
 
-// ------------------------------------------------------------------
-// 2. CONSTANTS
-// ------------------------------------------------------------------
+// ==============================================================================
+// 2. CONSTANTS (数据常量)
+// ==============================================================================
 
 const CLIENT_NAMES = [
   '涪江中学', 
@@ -119,20 +119,28 @@ const VERB_SETS = [
   ['协调', '对接', '沟通']
 ];
 
-// ------------------------------------------------------------------
-// 3. SERVICES (Gemini API)
-// ------------------------------------------------------------------
+// ==============================================================================
+// 3. AI SERVICES (Gemini 逻辑)
+// ==============================================================================
 
-// Initialize Gemini API
-// CHANGED: Added NEXT_PUBLIC_ prefix for Vercel Client Component compatibility
-const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_API_KEY });
+// Helper to get AI instance safely
+const getAIClient = () => {
+  // CRITICAL FIX: Use NEXT_PUBLIC_API_KEY for client-side usage
+  const apiKey = process.env.NEXT_PUBLIC_API_KEY || process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("API Key 未配置。请在 Vercel 环境变量中添加 NEXT_PUBLIC_API_KEY。");
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
 const getRandomElement = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
+// 图片转文字 (OCR)
 const extractTextFromImage = async (base64Data: string, mimeType: string): Promise<string> => {
   const prompt = "请准确识别并提取这张图片中的所有文字内容。过滤掉手机状态栏（时间、电量、信号）、导航栏、输入框提示等无关UI元素，只提取核心的日报/周报文本内容。保持原有的换行和逻辑结构。";
   
   try {
+    const ai = getAIClient();
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: {
@@ -148,14 +156,17 @@ const extractTextFromImage = async (base64Data: string, mimeType: string): Promi
       }
     });
     return response.text || "未能从图片中识别出文字。";
-  } catch (error) {
+  } catch (error: any) {
     console.error("OCR Error:", error);
+    if (error.message?.includes("API Key")) throw error;
     throw new Error("图片识别失败，请检查网络或重试。");
   }
 };
 
+// 统一调用 Gemini 接口
 const callGemini = async (prompt: string): Promise<string> => {
   try {
+    const ai = getAIClient();
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
@@ -165,12 +176,14 @@ const callGemini = async (prompt: string): Promise<string> => {
     });
 
     return response.text || "生成失败，请重试。";
-  } catch (error) {
+  } catch (error: any) {
     console.error("AI Generation Error:", error);
-    return "生成过程中发生错误，请检查网络或 API Key 设置。";
+    if (error.message?.includes("API Key")) return error.message;
+    return "生成过程中发生错误，请检查网络连接或 API Key 配额。";
   }
 };
 
+// 生成日报逻辑
 const generateDailyReport = async (data: ReportGenerationParams, selectedTone: string, selectedVerbs: string[]): Promise<string> => {
   let projectContent = "";
   let hasContent = false;
@@ -244,6 +257,7 @@ ${manualContent}
   return callGemini(prompt);
 };
 
+// 生成周报逻辑
 const generateWeeklyReport = async (inputText: string, selectedTone: string, selectedVerbs: string[], date?: string): Promise<string> => {
   if (!inputText.trim()) {
     throw new Error("请输入过去几天的日报内容或工作记录。");
@@ -271,6 +285,7 @@ ${inputText}
   return callGemini(prompt);
 };
 
+// 生成会议纪要逻辑
 const generateMeetingMinutes = async (audioBase64: string, context: string, date?: string): Promise<string> => {
   if (!audioBase64) {
     throw new Error("未检测到录音数据。");
@@ -329,6 +344,7 @@ const generateMeetingMinutes = async (audioBase64: string, context: string, date
 `;
 
   try {
+    const ai = getAIClient();
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: {
@@ -344,8 +360,9 @@ const generateMeetingMinutes = async (audioBase64: string, context: string, date
       }
     });
     return response.text || "生成会议纪要失败，请重试。";
-  } catch (error) {
+  } catch (error: any) {
     console.error("Meeting Generation Error:", error);
+    if (error.message?.includes("API Key")) throw error;
     throw new Error("会议纪要生成失败，可能是录音文件过大或网络问题。");
   }
 };
@@ -365,9 +382,9 @@ const generateReport = async (data: ReportGenerationParams): Promise<string> => 
   return generateDailyReport(data, selectedTone, selectedVerbs);
 };
 
-// ------------------------------------------------------------------
-// 4. COMPONENTS
-// ------------------------------------------------------------------
+// ==============================================================================
+// 4. SUB-COMPONENTS (子组件)
+// ==============================================================================
 
 // --- StatusToggle Component ---
 interface StatusToggleProps {
@@ -671,11 +688,11 @@ const MeetingRecorder: React.FC<MeetingRecorderProps> = ({ onRecordingComplete, 
   );
 };
 
-// ------------------------------------------------------------------
-// 5. MAIN REPORT GENERATOR PAGE
-// ------------------------------------------------------------------
+// ==============================================================================
+// 5. MAIN PAGE COMPONENT (主页面)
+// ==============================================================================
 
-export default function Page() {
+export default function App() {
   const backgroundImageUrl = "https://i.postimg.cc/nr7Lmp7N/bg.png";
   
   // State
@@ -683,6 +700,13 @@ export default function Page() {
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [showQR, setShowQR] = useState(false);
   
+  // Config Status Check
+  const [hasApiKey, setHasApiKey] = useState(false);
+  useEffect(() => {
+    // Check if key exists in env (will be true/false string or actual value depending on build)
+    setHasApiKey(!!process.env.NEXT_PUBLIC_API_KEY);
+  }, []);
+
   // Daily State
   const [internalSelections, setInternalSelections] = useState<InternalSelectionMap>({});
   const [projectSelections, setProjectSelections] = useState<ProjectSelectionMap>({});
@@ -825,6 +849,9 @@ export default function Page() {
 
   return (
     <div className="min-h-screen relative overflow-x-hidden font-sans">
+      {/* Inject Tailwind CSS CDN manually because Next.js ignores index.html */}
+      <script src="https://cdn.tailwindcss.com"></script>
+      
       {/* Global Styles / Fonts */}
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -1148,13 +1175,26 @@ export default function Page() {
         {/* Sticky Action Bar */}
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-md border-t border-slate-200/60 z-50">
           <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
-            <div className="hidden sm:block text-xs text-slate-500 font-medium">
-               {mode === 'DAILY' 
-                 ? '提示：勾选任务后，可在上方手动输入补充事项，AI 将自动融合生成。'
-                 : mode === 'WEEKLY'
-                 ? '提示：上传图片或粘贴文字后，点击右侧生成按钮。'
-                 : '提示：录音完成后，点击生成按钮。录音越清晰，识别越准确。'
-               }
+            <div className="hidden sm:block flex-1">
+               <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                 {hasApiKey ? (
+                   <span className="flex items-center gap-1 text-green-600 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">
+                     <ShieldCheck className="w-3 h-3" /> API Key 已就绪
+                   </span>
+                 ) : (
+                   <span className="flex items-center gap-1 text-red-600 bg-red-50 px-2 py-0.5 rounded-full border border-red-200">
+                     <ShieldAlert className="w-3 h-3" /> 未检测到 API Key
+                   </span>
+                 )}
+                 <span className="hidden md:inline">
+                   {mode === 'DAILY' 
+                     ? '· 勾选任务后可补充输入，AI 将融合生成'
+                     : mode === 'WEEKLY'
+                     ? '· 支持多图上传，AI 自动提取文字'
+                     : '· 录音越清晰，会议纪要越准确'
+                   }
+                 </span>
+               </div>
             </div>
             <button
               onClick={handleGenerate}
